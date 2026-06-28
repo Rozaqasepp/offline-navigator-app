@@ -1,36 +1,46 @@
 // src/services/CacheService.ts
+// Layanan caching ubin peta ke IndexedDB via localforage
+
 import localforage from 'localforage';
 
-localforage.config({
+const tileStore = localforage.createInstance({
   name: 'OfflineMapCache',
   storeName: 'tiles'
 });
 
 export const saveTile = async (url: string): Promise<void> => {
   try {
+    const existing = await tileStore.getItem(url);
+    if (existing) return; // Sudah ada, tidak perlu download ulang
+
     const response = await fetch(url);
+    if (!response.ok) return;
     const blob = await response.blob();
-    await localforage.setItem(url, blob);
+    await tileStore.setItem(url, blob);
   } catch (err) {
     console.warn("Gagal cache tile:", url);
   }
 };
 
-export const getCachedTile = async (url: string): Promise<string | null> => {
+export const getCachedTile = async (url: string): Promise<Blob | null> => {
   try {
-    const blob = await localforage.getItem<Blob>(url);
-    if (blob) {
-      return URL.createObjectURL(blob);
-    }
-    return null;
-  } catch (err) {
+    const blob = await tileStore.getItem<Blob>(url);
+    return blob || null;
+  } catch {
     return null;
   }
 };
 
-// Fungsi untuk membuat koordinat tile (Z, X, Y) di sekitar rute
-export const cacheRouteTiles = async (routeGeoJSON: any, tileUrlTemplate: string) => {
-  // Implementasi algoritma bounding box untuk menemukan X, Y pada zoom level tertentu (misal Z=15-18)
-  // Untuk setiap X, Y, Z, hasilkan URL lalu panggil saveTile(url)
-  // ... (Disimulasikan untuk ringkasnya)
+/**
+ * Hitung jumlah ubin yang tersimpan di cache
+ */
+export const getTileCacheCount = async (): Promise<number> => {
+  return await tileStore.length();
+};
+
+/**
+ * Hapus seluruh cache ubin
+ */
+export const clearTileCache = async (): Promise<void> => {
+  await tileStore.clear();
 };

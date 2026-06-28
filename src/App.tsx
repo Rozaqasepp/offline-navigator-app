@@ -15,6 +15,9 @@ import '@ionic/react/css/text-transformation.css';
 import '@ionic/react/css/flex-utils.css';
 import '@ionic/react/css/display.css';
 
+// Custom theme
+import './theme/variables.css';
+
 setupIonicReact();
 
 const App: React.FC = () => (

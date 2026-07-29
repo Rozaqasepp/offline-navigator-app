@@ -1,36 +1,60 @@
 // src/components/OfflineTileLayer.ts
+// Custom TileLayer yang memeriksa cache offline sebelum download dari internet.
+// Memperbaiki memory leak dengan revoke ObjectURL setelah tile di-load.
+
 import L from 'leaflet';
 import localforage from 'localforage';
 
-localforage.config({ name: 'OfflineMapCache', storeName: 'tiles' });
+const tileStore = localforage.createInstance({
+  name: 'OfflineMapCache',
+  storeName: 'tiles'
+});
 
 const CustomLayer = L.TileLayer.extend({
-  createTile: function (coords: any, done: any) {
+  createTile: function (coords: L.Coords, done: (error: Error | undefined, tile: HTMLElement) => void) {
     const tile = document.createElement('img');
-    const url = this.getTileUrl(coords);
+    const url = (this as L.TileLayer).getTileUrl(coords);
 
-    localforage.getItem<Blob>(url).then((blob) => {
+    // Revoke ObjectURL setelah gambar dimuat untuk mencegah memory leak
+    const cleanup = (objectUrl: string | null) => {
+      if (objectUrl) {
+        tile.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true });
+        tile.addEventListener('error', () => URL.revokeObjectURL(objectUrl), { once: true });
+      }
+    };
+
+    tileStore.getItem<Blob>(url).then((blob) => {
       if (blob) {
-        // File ada di memori offline HP
-        tile.src = URL.createObjectURL(blob);
-        done(null, tile);
+        // Ada di cache offline
+        const objectUrl = URL.createObjectURL(blob);
+        cleanup(objectUrl);
+        tile.src = objectUrl;
+        done(undefined, tile);
       } else {
-        // Tidak ada di memori, coba download (saat online)
+        // Tidak ada di cache, coba download (saat online)
         fetch(url)
           .then(res => {
-             if (!res.ok) throw new Error("Offline");
-             return res.blob();
+            if (!res.ok) throw new Error('Offline');
+            return res.blob();
           })
           .then(newBlob => {
-            localforage.setItem(url, newBlob); // Simpan untuk nanti
-            tile.src = URL.createObjectURL(newBlob);
-            done(null, tile);
+            tileStore.setItem(url, newBlob); // Simpan untuk nanti (auto-cache)
+            const objectUrl = URL.createObjectURL(newBlob);
+            cleanup(objectUrl);
+            tile.src = objectUrl;
+            done(undefined, tile);
           })
           .catch(() => {
             // Jika offline dan belum di-cache, biarkan kosong
-            done(null, tile);
+            tile.src = '';
+            done(undefined, tile);
           });
       }
+    }).catch(() => {
+      // Fallback jika localforage error
+      tile.crossOrigin = 'anonymous';
+      tile.src = url;
+      done(undefined, tile);
     });
 
     return tile;
@@ -38,5 +62,5 @@ const CustomLayer = L.TileLayer.extend({
 });
 
 export const offlineTileLayer = (url: string, options?: L.TileLayerOptions) => {
-  return new (CustomLayer as any)(url, options) as L.TileLayer;
+  return new (CustomLayer as unknown as new (url: string, options?: L.TileLayerOptions) => L.TileLayer)(url, options);
 };
